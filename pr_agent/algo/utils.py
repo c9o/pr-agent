@@ -203,7 +203,7 @@ def convert_to_markdown_v2(output_data: dict,
                     markdown_text += f"### {emoji} Key issues to review\n\n#### \n"
                 for i, issue in enumerate(issues):
                     try:
-                        if not issue:
+                        if not issue or "relevant_file" not in issue:
                             continue
                         relevant_file = issue.get('relevant_file', '').strip()
                         issue_header = issue.get('issue_header', '').strip()
@@ -557,7 +557,7 @@ def _fix_key_value(key: str, value: str):
 
 
 def load_yaml(response_text: str, keys_fix_yaml: List[str] = [], first_key="", last_key="") -> dict:
-    response_text = response_text.strip('\n').removeprefix('```yaml').rstrip().removesuffix('```')
+    response_text = response_text.strip().removeprefix('```yaml').removesuffix('```').strip()
     try:
         data = yaml.safe_load(response_text)
     except Exception as e:
@@ -570,78 +570,75 @@ def load_yaml(response_text: str, keys_fix_yaml: List[str] = [], first_key="", l
 def try_fix_yaml(response_text: str,
                  keys_fix_yaml: List[str] = [],
                  first_key="",
-                 last_key="",) -> dict:
+                 last_key="") -> dict:
     response_text_lines = response_text.split('\n')
 
     keys_yaml = ['relevant line:', 'suggestion content:', 'relevant file:', 'existing code:', 'improved code:']
-    keys_yaml = keys_yaml + keys_fix_yaml
-    # first fallback - try to convert 'relevant line: ...' to relevant line: |-\n        ...'
+    keys_yaml += keys_fix_yaml
+    # first fallback - try to convert 'relevant line: ...' to 'relevant line: |-\n        ...'
     response_text_lines_copy = response_text_lines.copy()
-    for i in range(0, len(response_text_lines_copy)):
+    for i in range(len(response_text_lines_copy)):
         for key in keys_yaml:
-            if key in response_text_lines_copy[i] and not '|-' in response_text_lines_copy[i]:
-                response_text_lines_copy[i] = response_text_lines_copy[i].replace(f'{key}',
-                                                                                  f'{key} |-\n        ')
+            if key in response_text_lines_copy[i] and '|-' not in response_text_lines_copy[i]:
+                response_text_lines_copy[i] = response_text_lines_copy[i].replace(f'{key}', f'{key} |-\n        ')
+
     try:
         data = yaml.safe_load('\n'.join(response_text_lines_copy))
         get_logger().info(f"Successfully parsed AI prediction after adding |-\n")
         return data
-    except:
-        get_logger().info(f"Failed to parse AI prediction after adding |-\n")
+    except Exception as e:
+        get_logger().info(f"Failed to parse AI prediction after adding |-\n: {e}")
 
-    # second fallback - try to extract only range from first ```yaml to ````
+    # second fallback - try to extract only range from first ```yaml to ```
     snippet_pattern = r'```(yaml)?[\s\S]*?```'
     snippet = re.search(snippet_pattern, '\n'.join(response_text_lines_copy))
     if snippet:
         snippet_text = snippet.group()
         try:
-            data = yaml.safe_load(snippet_text.removeprefix('```yaml').rstrip('`'))
+            data = yaml.safe_load(snippet_text.removeprefix('```yaml').removesuffix('```').strip())
             get_logger().info(f"Successfully parsed AI prediction after extracting yaml snippet")
             return data
-        except:
-            pass
-
+        except Exception as e:
+            get_logger().info(f"Failed to parse AI prediction after extracting yaml snippet: {e}")
 
     # third fallback - try to remove leading and trailing curly brackets
-    response_text_copy = response_text.strip().rstrip().removeprefix('{').removesuffix('}').rstrip(':\n')
+    response_text_copy = response_text.strip().removeprefix('{').removesuffix('}').strip()
     try:
         data = yaml.safe_load(response_text_copy)
         get_logger().info(f"Successfully parsed AI prediction after removing curly brackets")
         return data
-    except:
-        pass
+    except Exception as e:
+        get_logger().info(f"Failed to parse AI prediction after removing curly brackets: {e}")
 
-
-    # forth fallback - try to extract yaml snippet by 'first_key' and 'last_key'
-    # note that 'last_key' can be in practice a key that is not the last key in the yaml snippet.
-    # it just needs to be some inner key, so we can look for newlines after it
+    # fourth fallback - try to extract yaml snippet by 'first_key' and 'last_key'
     if first_key and last_key:
         index_start = response_text.find(f"\n{first_key}:")
         if index_start == -1:
             index_start = response_text.find(f"{first_key}:")
         index_last_code = response_text.rfind(f"{last_key}:")
-        index_end = response_text.find("\n\n", index_last_code) # look for newlines after last_key
+        index_end = response_text.find("\n\n", index_last_code)  # look for newlines after last_key
         if index_end == -1:
             index_end = len(response_text)
-        response_text_copy = response_text[index_start:index_end].strip().strip('```yaml').strip('`').strip()
+        response_text_copy = response_text[index_start:index_end].strip().removeprefix('```yaml').removesuffix('```').strip()
         try:
             data = yaml.safe_load(response_text_copy)
             get_logger().info(f"Successfully parsed AI prediction after extracting yaml snippet")
             return data
-        except:
-            pass
-
+        except Exception as e:
+            get_logger().info(f"Failed to parse AI prediction after extracting yaml snippet by keys: {e}")
 
     # fifth fallback - try to remove last lines
-    data = {}
     for i in range(1, len(response_text_lines)):
         response_text_lines_tmp = '\n'.join(response_text_lines[:-i])
         try:
             data = yaml.safe_load(response_text_lines_tmp)
             get_logger().info(f"Successfully parsed AI prediction after removing {i} lines")
             return data
-        except:
-            pass
+        except Exception as e:
+            get_logger().info(f"Failed to parse AI prediction after removing {i} lines: {e}")
+
+    # if all fallbacks fail, return an empty dictionary
+    return {}
 
 
 def set_custom_labels(variables, git_provider=None):
