@@ -10,7 +10,16 @@ from pr_agent.config_loader import get_settings
 from pr_agent.log import get_logger
 
 OPENAI_RETRIES = 5
-
+import os
+import json
+SAVE_REQUEST_FILE = "/tmp/data.jsonl"
+def append_line_to_file(new_data):
+    if not os.path.exists(SAVE_REQUEST_FILE):
+        with open(SAVE_REQUEST_FILE, 'w') as file:
+            pass
+    with open(SAVE_REQUEST_FILE, 'a') as file:
+        json.dump(new_data, file)
+        file.write('\n')
 
 class LiteLLMAIHandler(BaseAiHandler):
     """
@@ -67,9 +76,9 @@ class LiteLLMAIHandler(BaseAiHandler):
         if get_settings().get("HUGGINGFACE.API_BASE", None) and 'huggingface' in get_settings().config.model:
             litellm.api_base = get_settings().huggingface.api_base
             self.api_base = get_settings().huggingface.api_base
-        if get_settings().get("OLLAMA.API_BASE", None):
-            litellm.api_base = get_settings().ollama.api_base
-            self.api_base = get_settings().ollama.api_base
+        # if get_settings().get("OLLAMA.API_BASE", None):
+        #     litellm.api_base = get_settings().ollama.api_base
+        #     self.api_base = get_settings().ollama.api_base
         if get_settings().get("HUGGINGFACE.REPETITION_PENALTY", None):
             self.repetition_penalty = float(get_settings().huggingface.repetition_penalty)
         if get_settings().get("VERTEXAI.VERTEX_PROJECT", None):
@@ -107,6 +116,7 @@ class LiteLLMAIHandler(BaseAiHandler):
             if self.azure:
                 model = 'azure/' + model
             messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
+            append_line_to_file({"system": system, "user": user})
             if img_path:
                 try:
                     # check if the image link is alive
@@ -127,6 +137,7 @@ class LiteLLMAIHandler(BaseAiHandler):
                 "messages": messages,
                 "temperature": temperature,
                 "force_timeout": get_settings().config.ai_timeout,
+                "timeout": 7200,
                 "api_base": self.api_base,
             }
             seed = get_settings().config.get("seed", -1)
